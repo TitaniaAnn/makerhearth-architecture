@@ -1,0 +1,30 @@
+{
+    "name": "titaniaann/makerhearth-architecture",
+    "description": "A reference implementation of the multi-tenant studio-management architecture behind MakerHearth. Demonstrates immutable ledgers with computed balances, strictly-forward state machines, benefit resolution across sources, snapshot-on-purchase pricing, the single order-paid contract, refund decision-vs-movement, and banker's-rounding money math — extracted from the production Laravel platform into a small, framework-free PHP package.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "ext-pdo_sqlite": "*",
+        "brick/math": "^0.12"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "MakerHearth\\Architecture\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "MakerHearth\\Architecture\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
