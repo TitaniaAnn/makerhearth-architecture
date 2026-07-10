@@ -55,6 +55,21 @@ Read in order for a full tour, or jump to the topic you need.
     process model, migrations-on-release, backups.
 11. **[Testing strategy](docs/11-testing.md)** — Pest suite shape, tenant-scoped
     tests, the real-schema HTTP smoke test, concurrency tests.
+12. **[Data model](docs/12-data-model.md)** — the schema's shape: the three
+    hubs, the `source_*` join convention, structural patterns, and the
+    benefit/classes/firing spines (Mermaid ER diagrams).
+13. **[Key flows](docs/13-key-flows.md)** — the dynamic view: enrollment →
+    checkout → activation, waitlist promotion, firing consume, refunds,
+    webhooks, email dispatch, provisioning, BCP reconcile (sequence diagrams).
+14. **[Security architecture](docs/14-security.md)** — auth surfaces,
+    authorization layers, webhook integrity, signed/single-use URLs, injection
+    defenses, PII/privacy, rate limiting, audit trails.
+
+**[Architecture Decision Records](docs/adr/README.md)** — the twelve settled
+trade-offs (schema-per-tenant, dropping Cashier, optional Stripe, skipping
+Statamic, `is_active` over SoftDeletes, ledgers, the service layer,
+trigger-driven email, refund decision-vs-movement, Dokku, render-hook admin
+theming, cookie-free analytics) with context and consequences.
 
 ## Relationship to the code repo
 
