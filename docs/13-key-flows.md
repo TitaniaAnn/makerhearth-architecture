@@ -61,10 +61,11 @@ offer email (send failure logs, never blocks the promotion).
 
 - **Credit in:** firing-package activation writes a `PURCHASE` ledger entry
   (cubic inches, package expiry).
-- **Consume out:** on `KilnLoadService::markUnloaded()` — never earlier, so
-  pieces in damaged/ABORTED loads never bill. Wrapped in `DB::transaction`,
-  starting with `User::lockForUpdate()` so two simultaneous unloads can't both
-  read the same balance and drive it negative.
+- **Consume out:** at front-desk drop-off (`FiringService::dropOff`), one
+  record per firing; no kiln step charges, so billing never depends on what a
+  load contains and a failed firing is refired free. Wrapped in
+  `DB::transaction`, starting with `User::lockForUpdate()` so two simultaneous
+  charges can't both read the same balance and drive it negative.
 - **Transfers** lock both users in **PK-sorted order** (deadlock avoidance) and
   write a debit+credit pair. Corrections append new entries; nothing is edited.
 - **Notifications:** ready-for-pickup (first touch on unload), stale-pickup

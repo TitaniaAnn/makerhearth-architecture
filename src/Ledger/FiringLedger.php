@@ -18,9 +18,10 @@ use PDO;
  *      user's entries. There is no balance column to drift.
  *   3. CONSUMPTION IS SERIALIZED AND IDEMPOTENT. Production wraps consume in
  *      a transaction and row-locks the User (`lockForUpdate()`) so two
- *      simultaneous kiln unloads can't both read the same balance and each
- *      write a debit past the negative-balance guard; the firing's `billed_at`
- *      stamp is re-checked under the lock so double-unload bills exactly once.
+ *      simultaneous charges can't both read the same balance and each write
+ *      a debit past the negative-balance guard; the firing's `billed_at`
+ *      stamp is re-checked under the lock so a double-submitted drop-off
+ *      bills exactly once.
  *      SQLite has no row locks, so this reference uses an IMMEDIATE
  *      transaction (a write lock on the database) — same serialization
  *      guarantee, database-wide instead of per-row.
@@ -33,7 +34,7 @@ use PDO;
  * correct and member-fair.
  *
  * @see ARCHITECTURE.md §3 — "Immutable ledgers; balances computed, never stored"
- * @see ARCHITECTURE.md §4 — consume runs on kiln-load UNLOAD, never earlier
+ * @see ARCHITECTURE.md §4 — consume runs at front-desk drop-off; no kiln step charges
  */
 final class FiringLedger
 {
@@ -80,13 +81,14 @@ final class FiringLedger
     }
 
     /**
-     * Consume credit for a piece coming out of a kiln. Called by the
-     * kiln-load lifecycle on UNLOADED — never on firing creation, so pieces
-     * in damaged/aborted loads never bill.
+     * Consume credit for a piece dropped off to be fired. Called by
+     * FiringDropOff at the front desk — never by a kiln transition, so billing
+     * never depends on what a load contains.
      *
      * Idempotent: a firing already stamped `billedAt` is left untouched, and
      * the stamp is re-checked inside the serialized section, so a
-     * double-unload writes exactly one debit.
+     * double-submit writes exactly one debit — and a refired piece (which
+     * keeps its stamp) is never charged again.
      */
     public function consumeFiring(Firing $firing): void
     {

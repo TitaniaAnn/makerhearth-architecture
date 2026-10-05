@@ -10,10 +10,9 @@ namespace MakerHearth\Architecture\Firing;
  * of truth (services consult it; nothing writes `status` directly).
  *
  * ABORTED is reachable from any pre-terminal state and is itself terminal.
- * Because billing happens only on the transition INTO UNLOADED (§4), and
- * ABORTED can never reach UNLOADED, pieces in an aborted load structurally
- * cannot bill — the invariant is enforced by the state graph, not by an
- * `if`.
+ * No transition charges anything: a piece is paid for at front-desk drop-off
+ * (§4), so an aborted load's pieces are refired for free without any special
+ * code — there is nothing in the kiln process that could charge them again.
  *
  * @see ARCHITECTURE.md §4 — "Strictly-forward state machines"
  */

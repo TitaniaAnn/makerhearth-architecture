@@ -59,7 +59,7 @@ final class FiringLedgerTest extends TestCase
         $firing = new Firing('f-1', 'mara', 120);
 
         $this->ledger->consumeFiring($firing);
-        $this->ledger->consumeFiring($firing); // double unload / replay
+        $this->ledger->consumeFiring($firing); // double-submitted drop-off / replay
 
         self::assertCount(2, $this->ledger->entriesFor('mara')); // 1 credit + exactly 1 debit
         self::assertSame(380, $this->ledger->balanceFor('mara'));

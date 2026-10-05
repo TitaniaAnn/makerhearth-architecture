@@ -28,9 +28,11 @@ src/
 │
 ├── Firing/                        # Strictly-forward state machine
 │   ├── KilnLoadStatus.php         ← the transition map — the single source of truth
-│   ├── KilnLoadLifecycle.php      ← named transitions; billing ONLY on unload
+│   ├── KilnLoadLifecycle.php      ← named transitions; none charges; free refire
+│   ├── FiringDropOff.php          ← the billing point: charge at front-desk drop-off
+│   ├── FiringType.php             ← bisque / glaze / other, per drop-off record
 │   ├── KilnLoad.php               ← status readable everywhere, writable only by the lifecycle
-│   ├── Firing.php                 ← a member's piece; billedAt = idempotency stamp
+│   ├── Firing.php                 ← a drop-off record; billedAt = idempotency stamp
 │   └── InvalidKilnLoadTransition.php
 │
 ├── Benefits/                      # Single-contract resolution across sources
@@ -56,13 +58,14 @@ tests/                             # Verifies the contract claims in ARCHITECTUR
 │                                     decimal-string tax rates, refund tax share
 ├── FiringLedgerTest.php           ← §3 computed balance, append-only corrections, idempotent
 │                                     consume, fail-closed negative guard, atomic transfer
-├── KilnLoadLifecycleTest.php      ← §4 forward-only, bills exactly once, ABORTED never bills
+├── KilnLoadLifecycleTest.php      ← §4 forward-only, charged once at drop-off, free refire,
+│                                     one payment vs. per firing
 ├── BenefitResolverTest.php        ← §5 max/OR aggregation semantics
 ├── RefundPolicyTest.php           ← §6 window math as pure arithmetic
 └── OrderServiceTest.php           ← §7 snapshot survives reprice, markPaid idempotent + strict
 ```
 
-27 PHP files — 21 under `src/` and 6 under `tests/` — about 1,500 lines
+29 PHP files — 23 under `src/` and 6 under `tests/` — about 1,700 lines
 in total. Substantial enough to demonstrate real architecture; small enough
 to read in fifteen minutes.
 

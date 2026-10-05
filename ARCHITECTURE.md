@@ -129,8 +129,9 @@ Corrections append [`ADJUSTMENT`](src/Ledger/LedgerEntryType.php) rows;
 expiry is an explicit `EXPIRATION` debit posted by a scheduled sweep (never
 a read-time filter — filtering expired credits while keeping the debits
 taken against them produced phantom negative balances in an earlier
-design). Consumption is idempotent per firing (the `billedAt` stamp is
-re-checked inside the serialized section) and guarded against driving the
+design). Consumption runs once per drop-off record and is idempotent (the
+`billedAt` stamp is re-checked inside the serialized section), so a
+double-submitted drop-off writes one debit; it's guarded against driving the
 balance negative.
 
 Production wraps every balance mutation in a transaction that row-locks the
@@ -164,30 +165,43 @@ which preserves append-only semantics; nothing about the API would change.
 
 ---
 
-## 4. Strictly-forward state machines; consume on unload
+## 4. Strictly-forward state machines; charge at drop-off
 
 ### The problem
 
 A kiln load moves through a physical process: loading → ready → firing →
 cooling → ready-to-unload → unloaded, with abort possible any time before
-the end (kiln fault, glaze disaster). Members must never pay for pieces
-that didn't survive a successful firing — and "never" has to survive
-concurrent staff actions, retried jobs, and future code changes.
+the end (power cut, element failure). Members pay for space in the kiln, not
+for how a piece comes out, and the front desk takes the money when a piece is
+handed in. A failed firing must never charge a member twice, and large
+community studios can't track every piece through every kiln.
 
 ### The decision
 
 [`KilnLoadStatus`](src/Firing/KilnLoadStatus.php) is an enum whose
 `canTransitionTo()` map is the single source of truth; transitions happen
 only through [`KilnLoadLifecycle`](src/Firing/KilnLoadLifecycle.php)'s named
-methods, and illegal moves throw. Billing lives **only** on the transition
-into UNLOADED. Because ABORTED is terminal and can never reach UNLOADED,
-"aborted loads never bill" is enforced by the shape of the state graph
-rather than by an `if` someone could delete.
+methods, and illegal moves throw. **No transition charges anything.** Billing
+lives at front-desk drop-off ([`FiringDropOff`](src/Firing/FiringDropOff.php)),
+one record per firing ([`FiringType`](src/Firing/FiringType.php)), so it never
+depends on what a load contains: by default a load tracks kiln status only and
+holds no pieces (standard tracking: drop-off and pick-up); studios that want
+it can put pieces in loads (detailed tracking).
+
+`billedAt` is the idempotency stamp that does the rest. A double-click at the
+desk writes one debit. A failed firing is refired for free with no special
+code: in standard tracking nothing in the kiln process charges, and in
+detailed tracking `refireAbortedLoad()` moves the pieces to a new load with
+their stamps intact. Whether bisque and glaze are one payment or two is a
+per-studio setting; with one payment, a glaze drop-off links to the paid bisque
+record that covers it, and a glaze drop-off with nothing to cover it (bisqued
+elsewhere) charges.
 
 Verified by
 [`tests/KilnLoadLifecycleTest.php`](tests/KilnLoadLifecycleTest.php): no
-skipping, no moving backward, the happy path bills each piece exactly once,
-and an aborted load's members keep their full balance.
+skipping, no moving backward, a piece is charged exactly once at drop-off and
+never by the kiln, an aborted load's pieces refire for free, and bisque + glaze
+are two charges unless one payment covers both.
 
 Production uses the same shape for tenant lifecycle, plan billing status,
 grant pipelines, substitute requests, party bookings, and campaign sends —
@@ -200,15 +214,18 @@ A workflow engine (Temporal, Symfony Workflow) is built for graphs that
 change at runtime or span services; these graphs are small, fixed, and
 in-process — a custom enum costs less than the abstraction. Status
 booleans (`is_fired`, `is_aborted`) are the classic alternative and the
-classic source of impossible states.
+classic source of impossible states. Charging at unload (an earlier design)
+tied billing to per-piece kiln tracking that big studios can't keep up with,
+and didn't match where the money actually changes hands.
 
 ### Where the seams are
 
 The transition map is code, so a studio cannot customize the kiln process —
-deliberate: the physics doesn't vary. The map's one soft spot is
-transitions with side effects (unload → consume): the lifecycle must call
-the ledger *after* the transition commits, and the ledger's own idempotency
-(§3) is what makes a crash between the two safe to retry.
+deliberate: the physics doesn't vary. Because no transition has a billing
+side effect, a crash mid-transition can't half-charge anyone; the only money
+moment is drop-off, and the ledger's own idempotency (§3) makes a retried
+drop-off safe. Refunds (a piece the member takes home unfired) are a staff
+adjustment, case by case; a paid drop-off record is never deleted.
 
 ---
 
