@@ -101,7 +101,7 @@ resolving the tenant from event metadata / the URL. The platform console
 | Audit | spatie/laravel-activitylog | Field-level history on audit-sensitive models |
 | PDF | barryvdh/laravel-dompdf | Year-end tax receipts, order receipts |
 | Platform-admin MFA | laravel/fortify (TOTP only, routes suppressed elsewhere) | Never wired to tenant surfaces |
-| Observability | laravel/pulse + queue/scheduler heartbeat commands | See `docs/OBSERVABILITY.md` in the code repo |
+| Observability | laravel/pulse + queue/scheduler heartbeat commands | See `docs/OBSERVABILITY.md` in the private production repo |
 | Testing | Pest 3 | ~800 files, ~5,000 tests |
 | Deploy | Dokku on a single Hetzner VM | Zero PaaS cost pre-revenue; Forge is the later target |
 
@@ -122,9 +122,9 @@ app/
   Http/Livewire/          Portal/ (53) · Kiosk/ · Pos/ (with Concerns/ traits) · Staff/
   Http/Controllers/       webhooks, marketing site, platform console, onboarding
   Jobs/                   6 tenant-aware queued jobs
-  Models/                 221 Eloquent models
+  Models/                 220 Eloquent models
   Observers/              13 model observers (invariant enforcement + live-update emission)
-  Services/               270 classes in 47 domain namespaces — the domain API
+  Services/               271 classes in 47 domain namespaces — the domain API
   Support/                shared primitives (MoneyMath, TenantTime, ClientIp, …)
   Themes/                 theme catalog value objects
 routes/

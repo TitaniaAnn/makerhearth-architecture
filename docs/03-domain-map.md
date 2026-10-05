@@ -1,6 +1,6 @@
 # 3. Domain Map
 
-The 221 models and 270 service classes are organized into the domain namespaces below
+The 220 models and 271 service classes are organized into the domain namespaces below
 (`app/Services/<Domain>/`). Each domain exposes **service classes as its API**;
 models are thin. Cross-domain calls go service → service (e.g. enrollment calls
 the benefit resolver and the cart service), never model → model.

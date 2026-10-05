@@ -34,7 +34,7 @@ are thin and deliberately give you no way to cheat: in this cut,
 (`private(set)`) so status is readable everywhere but writable only through
 [`KilnLoadLifecycle`](src/Firing/KilnLoadLifecycle.php) and
 [`OrderService`](src/Commerce/OrderService.php). The production platform has
-270 service classes across 47 domain namespaces following this rule; the
+271 service classes across 47 domain namespaces following this rule; the
 BCP offline-reconcile path replays queued device events through the *same*
 service entry points, which is the pattern's strongest payoff — an entire
 extra surface for free, with no new invariant code.

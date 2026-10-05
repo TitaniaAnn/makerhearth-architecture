@@ -9,7 +9,7 @@ platform-operations console).
 This repository is **not** the full platform. It is a curated subset of the
 architectural pieces that make MakerHearth interesting, extracted from the
 production codebase into a small, framework-free PHP package so the
-patterns can be read — and run — without 221 models of studio business
+patterns can be read — and run — without 220 models of studio business
 logic in the way. Where a class body could be lifted verbatim
 (`MoneyMath`, `RefundDecision`), it was.
 
@@ -115,8 +115,11 @@ the layer above these extracted patterns:
 - [Payments & billing](docs/05-payments-and-billing.md) · [Messaging & email](docs/06-messaging-and-email.md) · [Platform operations](docs/07-platform-operations.md) · [Public site & theming](docs/08-public-site-and-theming.md)
 - [Scheduled work](docs/09-scheduled-work.md) · [Deployment](docs/10-deployment.md) · [Testing](docs/11-testing.md) · [Data model](docs/12-data-model.md) · [Key flows](docs/13-key-flows.md) · [Security](docs/14-security.md)
 
-The production repository is
-[makerhearth-laravel](https://github.com/TitaniaAnn/makerhearth-laravel)
-(221 Eloquent models, 270 service classes, ~5,000 tests as of October
-2026); its `.design-docs/`
-holds the authoritative product spec.
+The production code lives in a private repository (220 Eloquent models,
+271 service classes, ~5,000 tests as of October 2026). Its `.design-docs/`
+holds the authoritative product spec. This repo and its `docs/` describe
+that architecture without requiring access to either.
+
+## License
+
+[MIT](LICENSE)
