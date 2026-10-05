@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A **reference architecture**, not a runnable product. It publishes a curated subset of the multi-tenant studio-management architecture behind MakerHearth (the production repo is [makerhearth-laravel](https://github.com/TitaniaAnn/makerhearth-laravel)), extracted into a small framework-free PHP 8.4 package. README.md and ARCHITECTURE.md are the primary deliverables; the code under `src/` exists to make their claims verifiable, and every test names the ARCHITECTURE.md section it verifies.
+A **reference architecture**, not a runnable product. It publishes a curated subset of the multi-tenant studio-management architecture behind MakerHearth (the production repo, `makerhearth-laravel`, is private: never link to it from public files; describe it as the private production repo), extracted into a small framework-free PHP 8.4 package. README.md and ARCHITECTURE.md are the primary deliverables; the code under `src/` exists to make their claims verifiable, and every test names the ARCHITECTURE.md section it verifies.
 
 There is no web surface, no Laravel, no database server — the ledger tests run against `:memory:` SQLite via `pdo_sqlite`. The `docs/` directory documents the whole production platform (multi-tenancy, messaging, platform console, deployment, security) and is prose-only by design.
 

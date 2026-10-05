@@ -1,7 +1,7 @@
 # 13. Key Flows
 
 The dynamic view: what calls what, in what order, and where the invariants
-live. Traced from the real service code (the code repo's `docs/DOMAIN_GUIDE.md`
+live. Traced from the real service code (the private production repo's `docs/DOMAIN_GUIDE.md`
 is the file-linked companion).
 
 ## 13.1 Enrollment → cart → checkout → activation

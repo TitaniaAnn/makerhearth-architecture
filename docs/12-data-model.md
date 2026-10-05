@@ -1,8 +1,7 @@
 # 12. Data Model
 
-A distilled view of the schema (221 models; 326 tenant + 68 central
-migrations). The code repo's [`docs/ERD.md`](https://github.com/TitaniaAnn/makerhearth-laravel/blob/main/docs/ERD.md)
-carries the full per-domain Mermaid ER diagrams generated from the Eloquent
+A distilled view of the schema (220 models; 326 tenant + 68 central
+migrations). The private production repo's `docs/ERD.md` carries the full per-domain Mermaid ER diagrams generated from the Eloquent
 models; this document captures the **shape** — the hubs, the join conventions,
 and the structural patterns a schema reader needs first.
 
@@ -157,6 +156,6 @@ tenant ids/user ids as plain values.
 ## Reading order
 
 1. This document (shape + idioms).
-2. The code repo's `docs/ERD.md` (all per-domain diagrams).
-3. `.design-docs/MODELS.md` (the authoritative 4,400-line pseudocode spec) for
-   field-level semantics and edge cases.
+2. With access to the private production repo: its `docs/ERD.md` (all
+   per-domain diagrams), then `.design-docs/MODELS.md` (the authoritative
+   4,400-line pseudocode spec) for field-level semantics and edge cases.
