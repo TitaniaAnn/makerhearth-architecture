@@ -15,7 +15,8 @@ namespace MakerHearth\Architecture\Refunds;
  * unit-testable, and lets Stripe-less studios settle PENDING refunds
  * out-of-band without touching policy.
  *
- * This is the production class verbatim (only the namespace differs).
+ * The class body is the production class verbatim; only the namespace and
+ * this docblock differ.
  *
  * @see ARCHITECTURE.md §6 — "Refund decisions are values, not actions"
  */

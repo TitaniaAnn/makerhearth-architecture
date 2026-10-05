@@ -1,6 +1,6 @@
 # 12. Data Model
 
-A distilled view of the schema (174 models; 269 tenant + 46 central
+A distilled view of the schema (221 models; 326 tenant + 68 central
 migrations). The code repo's [`docs/ERD.md`](https://github.com/TitaniaAnn/makerhearth-laravel/blob/main/docs/ERD.md)
 carries the full per-domain Mermaid ER diagrams generated from the Eloquent
 models; this document captures the **shape** — the hubs, the join conventions,
@@ -9,11 +9,15 @@ and the structural patterns a schema reader needs first.
 ## The three hubs
 
 - **`User` (tenant)** — the tenant-side hub. Role **flags**, not a roles table
-  (`is_studio_staff`, `is_member`, `is_teacher`, `is_board`, `is_volunteer`,
-  `is_artist`, `is_monitor`, `is_development_staff`). Role-specific data hangs
-  off **tabbed `hasOne` profile extensions** (`TeacherProfile`,
-  `VolunteerProfile`, `ArtistProfile`, `DonorProfile`) — `User` is never
-  subclassed.
+  (`is_studio_owner`, `is_studio_staff`, `is_member`, `is_teacher`,
+  `is_board`, `is_volunteer`, `is_artist`, `is_development_staff`). Two
+  things layer on top of the flags without replacing them: owner-defined
+  **staff roles** (`staff_roles` + `staff_role_user`) say which areas a
+  staff member may edit or delete in, and POS access comes from a
+  **volunteer role** marked `grants_pos_access` (this replaced an earlier
+  `is_monitor` flag). Role-specific data hangs off **tabbed `hasOne`
+  profile extensions** (`TeacherProfile`, `VolunteerProfile`,
+  `ArtistProfile`, `DonorProfile`) — `User` is never subclassed.
 - **`Order` / `OrderLineItem` (tenant)** — the money hub. Every purchasable
   domain joins the money domain through line items.
 - **`PlatformAdmin` (central)** — the operator hub: activity log, tickets,
@@ -27,6 +31,7 @@ flowchart TB
         M["Memberships · Passes · Firing packages"]
         C["Classes · Lessons · Parties · Events"]
         G["Gallery · Store products · Donations"]
+        R["Rentals · Gift cards"]
         S["Studio time (billed on checkout)"]
     end
     User --> COMMERCE
@@ -44,15 +49,28 @@ FK-constraint-free (avoids circular FKs); they are how activation finds its way
 back from a paid order line to the pending domain row. This is the single most
 important schema idiom to know when reading the money domain.
 
+Three columns change what an order's numbers mean, and every reader of the
+money domain needs them:
+
+- `total_cents` on a line **includes its tax** (`tax_rate_percent` +
+  `tax_cents` are snapshotted beside it; `orders.tax_cents` is the sum). The
+  price of the goods is `total_cents − tax_cents`.
+- `orders.gift_card_cents` is the part gift cards paid; `total_cents` stays
+  the full price.
+- `orders.payment_processor` + `processor_payment_ref` name who took the
+  money (the older Stripe columns are kept and backfilled).
+
 ## Structural patterns in the schema
 
 | Pattern | Tables |
 |---|---|
-| **Immutable ledger** (balance computed) | `firing_ledger_entries`, `store_credit_entries`, `pass_redemptions`, `free_class_ledger_entries`, `gallery_sales` |
-| **Append-only history/audit** | `waiver_signatures` (+ separate `waiver_revocations`), `donor_interactions`, `grant_application_status_histories`, `tenant_ticket_status_histories`, `platform_admin_activity_logs`, `automated_email_deliveries`, `bcp_events` |
-| **Snapshot-on-purchase** (frozen price/terms) | `cart_line_items`, `order_line_items`, `pass_purchases`, `firing_package_purchases`, `payroll_export_line_items`, `tax_receipts.donations_json` |
+| **Immutable ledger** (balance computed) | `firing_ledger_entries`, `store_credit_entries`, `gift_card_ledger_entries`, `pass_redemptions`, `free_class_ledger_entries`, `gallery_sales`, `order_payments` |
+| **Append-only history/audit** | `waiver_signatures` (+ separate `waiver_revocations`), `donor_interactions`, `grant_application_status_histories`, `tenant_ticket_status_histories`, `platform_admin_activity_logs`, `automated_email_deliveries`, `bcp_events`, `procedure_versions`, `procedure_acknowledgments`, `promo_redemptions`, `drawer_openings`, `membership_lifecycle_events`, `tenant_lifecycle_events` |
+| **Snapshot-on-purchase** (frozen price/terms) | `cart_line_items`, `order_line_items`, `pass_purchases`, `firing_package_purchases`, `rental_assignments`, `payroll_export_line_items`, `tax_receipts.donations_json`, `tenant_plans.locked_price_cents`, `tenant_service_orders` |
+| **Secret stored as a hash** | `gift_cards.code_hash` (HMAC keyed with the app key) + `code_last4`; device tokens (bcrypt) on kiosks, POS terminals, receipt printers |
+| **Nightly snapshot** (recomputable, read path for trends) | `growth_metrics_daily`, `platform_growth_daily`, `pageview_daily_rollup` |
 | **Per-tenant singleton** (`current()`) | `studio_settings`, `embed_settings`, `site_chromes`, `checkout_ctas` |
-| **Partial unique indexes** (one-active-row-per-key) | monitor shifts `(monitor, terminal) WHERE closed_at IS NULL`, substitute requests per session, suppressions `(LOWER(email), source) WHERE released_at IS NULL`, tax receipts `(donor, tax_year)` |
+| **Partial unique indexes** (one-active-row-per-key) | monitor shifts `(monitor, terminal) WHERE closed_at IS NULL`, substitute requests per session, suppressions `(LOWER(email), source) WHERE released_at IS NULL`, tax receipts `(donor, tax_year)`, one live renter per rental unit, one place per member on a rental waitlist, one default staff role |
 | **Dedup stamp columns** | `reminder_<window>_sent_at`, `stewardship_*_sent_at`, `churn_warning_sent_at`, `email_sent_at`, … |
 | **Read-model mapping** (no duplicate table) | `TeacherPayout` → `payroll_export_line_items` |
 | **STI** | `ClayProduct extends Product` (discriminated by category) |
@@ -65,7 +83,10 @@ important schema idiom to know when reading the money domain.
 runtime by `BenefitResolver` (a service, not a table). Tier gating adds
 `required_membership_tier_id` + `tier_price_override` (level-keyed JSON) to
 every catalog table (`pass_types`, `class_offerings`, `event_ticket_types`,
-`products`, `firing_package_products`).
+`products`, `firing_package_products`); rental space types carry a
+members-only flag and a minimum tier. Promo codes target catalog rows
+through `promo_code_targets` (class *templates* rather than offerings, so a
+code covers every term).
 
 ```mermaid
 erDiagram
@@ -123,7 +144,10 @@ erDiagram
 
 `tenants`/`domains` (+ denormalized `stripe_connect_account_id`),
 `platform_admins` → activity log / impersonation grants, `plan_tiers`/`addons`
-→ `tenant_plans` → `platform_billing_events`, `system_error_groups` →
+→ `tenant_plans` (locked price, billing period, discount coupon) +
+`tenant_addons` + `tenant_plan_discounts` → `platform_billing_events`,
+`service_offerings` → `tenant_service_orders`, `tenant_lifecycle_events` →
+`platform_growth_daily`, `system_error_groups` →
 `_occurrences`, `tenant_tickets` → comments/status history,
 `tenant_signup_attempts`, usage snapshots, `deleted_tenant_tombstones`, and the
 platform email-automation twin (`platform_email_automations`/`_steps`/

@@ -8,10 +8,9 @@ use MakerHearth\Architecture\Support\MoneyMath;
 
 /**
  * The class-cancellation refund policy: pure window math over
- * hours-before-start, returning a RefundDecision value. Every product kind
- * in production has a policy shaped exactly like this (classes, lessons,
- * events with separate admission/table windows, parties) — same tiers,
- * different windows, one movement path.
+ * hours-before-start, returning a RefundDecision value. Production has two
+ * policies shaped exactly like this (ClassRefundPolicy, PartyRefundPolicy):
+ * same tiers, different windows, one movement path.
  *
  * Note what is absent: no order, no Stripe, no database. That absence is
  * the design — the policy can be tested exhaustively as arithmetic

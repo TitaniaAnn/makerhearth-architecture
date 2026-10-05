@@ -10,24 +10,37 @@ provision → `pg_dump`/restore → DNS).
 
 ## Deploy mechanism
 
-`git push dokku main` → Heroku PHP buildpack (or shipped `Dockerfile`) builds
-in a container → the Procfile `release` process runs → atomic symlink swap
-into Traefik routing. **If release fails, the deploy aborts and the live
+`git push dokku main` → the Heroku PHP buildpack (herokuish) builds in a
+container → the Procfile `release` process runs → the `/up` startup
+healthcheck in `app.json` must pass (60-second grace) → atomic swap into
+Traefik routing. The repo-root `Dockerfile` is for local Sail only; Dokku
+doesn't use it. **If release fails, the deploy aborts and the live
 container is untouched** — migrations gate the deploy.
 
 ```
 web:       vendor/bin/heroku-php-nginx -C nginx.conf public/
 worker:    php artisan queue:work --tries=3 --max-time=3600
-scheduler: loop: php artisan schedule:run every 60s
+scheduler: bash scheduler.sh   # schedule:run every 60s
 release:   php artisan migrate --force
            && php artisan tenants:migrate --force
            && php artisan optimize
 ```
 
+- The scheduler loop lives in a script because herokuish splits Procfile
+  commands on whitespace without honouring shell quotes; an inline
+  `sh -c 'while …'` breaks into tokens.
 - `tenants:migrate --force` walks all tenant schemas idempotently in the
   release step — new tenant migrations apply to every studio on deploy.
 - Process scaling: `dokku ps:scale studio web=1 worker=1 scheduler=1`. Workers
   restart automatically on the container swap.
+- **The restart policy must be `always`, not Dokku's default `on-failure`.**
+  `queue:work --max-time=3600` exits cleanly after an hour by design, and
+  `on-failure` never restarts a clean exit, so for a month the worker ran
+  for one hour after each deploy and then sat dead until the next. The
+  worker-alive canary fired thousands of times before the cause was found.
+- **Live updates** run as a separate Dokku app from `Procfile.reverb`
+  (Laravel Reverb). It's optional: with it off or down, every live screen
+  falls back to polling.
 - Config is env-var-canonical via `dokku config:set` (and `config()` over
   `env()` in code means config caching is safe).
 
@@ -48,8 +61,20 @@ inspect, destroy.
 
 - Laravel Pulse for in-app performance/queue visibility.
 - `monitoring:heartbeat` + `queue:check-worker` / `queue:check-backlog` /
-  `queue:dispatch-heartbeat` crons detect a dead scheduler, a dead worker, or
-  a backed-up queue.
+  `queue:dispatch-heartbeat` / `schedule:check-stale` / `live:check` crons
+  detect a dead scheduler, a dead worker, a backed-up queue, a wedged
+  schedule mutex, or an unreachable websocket server, with an outside
+  dead-man's-switch ping.
+- `/health` probes DB, cache, storage, queue worker and the websocket server,
+  and returns 503 only when the database is down (degraded stays in
+  rotation).
+- One wide structured log line per request and per queued job (route,
+  status, duration, tenant, request id), with the request id carried across
+  the queue boundary, all on a PII-scrubbed stderr sink.
+- Business metrics (waiver blocks, refund-tier mix, firing throughput,
+  checkout latency, live-update delivery) feed a staff dashboard. Six
+  service-level objectives are defined over those series; their dashboard
+  and burn-rate alerting are currently darkened behind a platform switch.
 - Platform error capture (see [07](07-platform-operations.md)) turns every
   uncaught exception across every tenant into a triageable central row with
   operator alerting — the production error signal does not depend on log

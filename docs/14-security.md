@@ -5,9 +5,11 @@
 | Surface | Mechanism | Notes |
 |---|---|---|
 | Member portal | tenant `users` session (email verify, password reset) | schema-per-tenant isolates credentials per studio |
-| Staff admin (Filament) | same tenant session + role flags (`is_studio_staff`, …) via `canAccess()` gates | dev-staff-only resources (donor CRM, grants) additionally gate on `is_development_staff`/owner |
+| Staff admin (Filament) | same tenant session + role flags (`is_studio_staff`, …) + owner-defined staff roles | one `StudioPolicy` for every model; donor data, payroll, comps, POS PINs and devices are separate role powers |
 | Kiosk | **no user session** — paired-device token (bcrypt-hashed, issue/rotate/revoke) + physical presence; PIN/QR for identification | device pairing via one-time `?token=`, persisted as a cookie |
-| POS | paired-device token + monitor PIN per action (rate-limited per terminal); inactivity lock | staff ⊇ monitor; every transaction shift-attributed |
+| POS | paired-device token + operator PIN per action (rate-limited per terminal); inactivity lock | operators are staff or members holding a volunteer role that grants POS access; every transaction shift-attributed |
+| Receipt printer | the printer polls `/cloudprnt` with HTTP Basic, its device token as the password | a printer only ever sees its own jobs |
+| Live-update channels | `/broadcasting/auth` in the tenant domain group, signed per socket | staff, POS operators, paired terminals and kiosks only; a channel naming another tenant is denied and reported |
 | Platform console | dedicated `platform_admin` guard, central table, **mandatory TOTP**, 30-min idle timeout, throttled login/2FA, CLI-only account creation | cookie-isolated from tenant sessions; super-admin flag not mass-assignable |
 | BCP device | `X-BCP-Device-Token` (SHA-256 matched) for reconcile; HMAC-signed snapshot bundle with TTL | snapshot drives display only, never billing |
 
@@ -17,10 +19,20 @@ no cross-schema FKs.
 
 ## Authorization model
 
-Role **flags on `User`**, enforced in three layers: route middleware
+Role **flags on `User`**, enforced in four layers: route middleware
 (`monitor`, `pos.terminal`, `embed.headers`, `EnforceTenantStatus`), Filament
-`canAccess()` per resource, and the **service layer** (universal
-profile/waiver gates, tier/plan gates, cross-tenant guards in `TicketService`).
+`canAccess()` per resource, **`StudioPolicy`** (every model's policy:
+viewing is any active staff; create/update needs the area's *edit*
+permission; delete needs its *delete* permission), and the **service layer**
+(universal profile/waiver gates, tier/plan gates, cross-tenant guards in
+`TicketService`). Permission areas come from the admin sidebar sections, so a
+resource's permission moves with it. Owner-defined staff roles grant areas
+and extra powers on top of a default role that every staff member has; the
+studio owner has everything. A screen checked with no signed-in user is
+denied. Payroll lines can't be edited by the person they pay (unless that's
+the owner), staff can't comp themselves, and donor reports refuse to run
+for anyone without the donor-data power, including when a schedule runs as
+its creator.
 The platform side adds `platform.super` for destructive lifecycle actions.
 Gates fail closed: no waiver document → everything rejects; unresolvable plan
 tier → paid features denied.
@@ -36,6 +48,15 @@ tier → paid features denied.
   cached, `openssl_verify`'d per `SignatureVersion`).
 - **Google Calendar push**: acks 200 always, queues a tenant-aware job;
   config-gated.
+- **Square**: HMAC-verified **before** entering the tenant; a payment event
+  for one of our orders is matched by processor + reference, else by the
+  order reference echoed back.
+- **Accounting OAuth**: providers need a fixed redirect URI, so the callback
+  is central. The tenant, user, provider, a nonce and a 15-minute expiry
+  travel in an **encrypted** `state`; the nonce is single-use. Zoho's
+  data-centre domains from the callback are only used if they match Zoho's
+  own allowlist over https, so a forged callback can't redirect tokens.
+  Provider tokens are stored with encrypted casts.
 - Suspended/offboarding tenants: all webhooks short-circuit (still 200) — no
   background mutation for blocked tenants.
 
@@ -49,6 +70,10 @@ tier → paid features denied.
   stamps `redeemed_at`; a captured URL can't be replayed. Expiry swept by cron;
   ending an impersonation is owner-scoped.
 - BCP pairing URLs are one-time.
+- **Gift-card codes are never stored.** The table keeps an HMAC keyed with
+  the app key (findable, not readable) and the last four characters; the
+  code is emailed as a secret token, so even the stored email row is
+  masked. Balance checks are rate-limited per member.
 
 ## Injection defenses
 
@@ -92,21 +117,32 @@ non-embed CSRF is never weakened.
   marketing live-data blocks expose instructor first names, seat counts (not
   rosters), and publicly-bookable rows only.
 - **Waiver signatures** (incl. drawn images, size/type-sanitized) are
-  immutable; donor data is gated to development staff; PDFs (tax receipts) are
-  generated server-side and delivered to the addressee only.
+  immutable; donor data is gated to development staff and the donor-data
+  role power (including the donor/grant activity logs and anonymous gifts on
+  dashboards); PDFs (tax and order receipts) are generated server-side and
+  delivered to the addressee only; a member's order receipt URL returns 404,
+  not 403, to anyone else.
+- **Live-update messages carry no data**, only a topic and an id; screens
+  re-read the database, so a message can't leak or spoof content.
+- **Nonprofit determination letters** live on the central private disk and
+  download only from the operator console.
 
 ## Rate limiting & abuse
 
 Named limiters on platform login/2FA, embed endpoints (30/min/IP), the
-pageview beacon (60/min/IP), signup checkout return, and POS PIN attempts
-(per terminal). Error-capture sampling caps runaway loops; plan caps get a
+pageview beacon (60/min/IP), signup checkout return, POS PIN attempts (per
+terminal), gift-card balance checks (10/min/member), the CloudPRNT endpoint,
+the browser-error beacon, and live-channel auth. Error-capture sampling caps runaway loops; plan caps get a
 soft nightly audit.
 
 ## Audit trail
 
 Tenant side: spatie activity log on audit-sensitive models (memberships,
-applications, board terms, volunteer assignments, firings, donor
-stage/notes, grant amounts). Platform side: append-only
+applications, board terms, volunteer assignments, firings, kiln-load status,
+rental assignments, procedures, donor stage/notes, grant amounts), guarded by
+a test that fails if a model drops the trait. Studio owners' billing actions
+(add-ons, discount applications) are logged on both sides: the studio's
+activity log and the platform's audit log. Platform side: append-only
 `PlatformAdminActivityLog` for every operator action **including auth events
 and reading the audit log itself**. Status changes on grants/tickets write
 append-only history tables. Client IPs are captured through a single

@@ -9,8 +9,8 @@ platform-operations console).
 This repository is **not** the full platform. It is a curated subset of the
 architectural pieces that make MakerHearth interesting, extracted from the
 production codebase into a small, framework-free PHP package so the
-patterns can be read — and run — without 174 models of studio business
-logic in the way. Where a class could be lifted verbatim
+patterns can be read — and run — without 221 models of studio business
+logic in the way. Where a class body could be lifted verbatim
 (`MoneyMath`, `RefundDecision`), it was.
 
 ## What's here
@@ -52,7 +52,8 @@ src/
     └── ProductType.php
 
 tests/                             # Verifies the contract claims in ARCHITECTURE.md
-├── MoneyMathTest.php              ← §2 odd-half cases round HALF_EVEN, complements sum exactly
+├── MoneyMathTest.php              ← §2 odd-half cases round HALF_EVEN, complements sum exactly,
+│                                     decimal-string tax rates, refund tax share
 ├── FiringLedgerTest.php           ← §3 computed balance, append-only corrections, idempotent
 │                                     consume, fail-closed negative guard, atomic transfer
 ├── KilnLoadLifecycleTest.php      ← §4 forward-only, bills exactly once, ABORTED never bills
@@ -95,7 +96,7 @@ multi-tenancy, and the "every integration is optional" contract.
 
 ```bash
 composer install
-vendor/bin/phpunit                                   # all 33 tests (SQLite :memory:)
+vendor/bin/phpunit                                   # all 35 tests (SQLite :memory:)
 vendor/bin/phpunit --filter FiringLedgerTest         # one suite
 ```
 
@@ -113,5 +114,6 @@ the layer above these extracted patterns:
 
 The production repository is
 [makerhearth-laravel](https://github.com/TitaniaAnn/makerhearth-laravel)
-(174 Eloquent models, 182 services, ~2,200 tests); its `.design-docs/`
+(221 Eloquent models, 270 service classes, ~5,000 tests as of October
+2026); its `.design-docs/`
 holds the authoritative product spec.

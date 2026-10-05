@@ -31,6 +31,9 @@ review pass (18 findings, all closed).
 | 4 | Billing | plan catalog, `TenantPlan`, `PlanGate`, platform Stripe webhook, MRR dashboard (see [05](05-payments-and-billing.md)) |
 | 5 | Self-serve signup | signup-attempt audit trail, failed-signup recovery emails, plan picker, card-up-front trial checkout |
 | 6 | Ticket portal | tenant staff file tickets at `/admin/support`; cross-tenant queue at `/platform/tickets` |
+| — | Add-ons + plans | add-ons that grant features, studio self-serve add/cancel, annual billing, price lock, Enterprise + Gallery tiers, composable modules, services price list |
+| — | Discounts | flagship / early-adopter / nonprofit records, nonprofit application + review, one-discount-wins resolver, Stripe coupons synced nightly |
+| — | Growth metrics | studio lifecycle event spine, nightly platform snapshot, `/platform/growth` (funnel, MRR, billing vs. access churn, trial cohorts, at-risk studios), weekly digest |
 
 ## Tenant lifecycle
 
@@ -56,11 +59,31 @@ central cron.
   with the fingerprinter's message scrubbing.
 - `ErrorFingerprinter` groups by exception+frames **excluding line numbers**
   (a one-line shift doesn't split a group); UUIDs/long ids scrubbed from
-  messages.
+  messages. Blade `ViewException`s also fingerprint on the scrubbed message:
+  every view error shares the same Blade stack frames, so without it all
+  view errors across all tenants collapsed into one group whose message
+  froze at its first occurrence, and a real production 500 hid inside a
+  months-old group.
+- **Browser errors** arrive through an opt-in, throttled beacon and go into
+  the same groups and console, fingerprinted on the JS signature rather than
+  the PHP stack, with only the page's origin and path recorded (never the
+  query string). The console filters server vs. client and has a client-error
+  summary page.
 - `ErrorSampler` caps runaway loops at 1,000 occurrences/hour per tenant per
   group: counters stay accurate, ~99% of occurrence rows dropped.
 - Alerting: new groups email the operator; cross-tenant spikes (≥5 tenants in
   an hour) send higher-priority alerts, rate-limited per group.
+
+## Growth metrics
+
+Two churn truths are reported side by side: **billing churn** (plan moved to
+cancelled) and **access churn** (offboarding finalized). Studio lifecycle
+events are written only through one recorder, tapped from provisioning,
+plan changes, the lifecycle services and the billing webhook (after its
+ordering and identity guards). Trial conversion follows the same rule as
+billing: a $0 trial-start invoice isn't a conversion, the first real charge
+is. The studio setup checklist deliberately leaves out Stripe, because
+Stripe is optional.
 
 ## Tickets
 
@@ -69,7 +92,8 @@ strict visibility: tenant staff see only their tenant's tickets; internal
 notes are platform-only and never notify tenants. All mutations flow through
 `TicketService` (cross-tenant guards, status history, resolved-at stamping).
 Bug tickets auto-suggest related captured errors matched on tenant +
-request path.
+request path. Studio owners' add-on and service requests, and nonprofit
+discount applications, arrive as tickets too (one open request per item).
 
 ## Design principle
 

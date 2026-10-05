@@ -23,16 +23,20 @@ Filament/Blade — a deliberate decision to skip the Statamic dependency.
   COMING_SOON), reusable content snippets (incl. ordered media galleries), an
   SSRF-guarded single-page site importer, live-data block preview iframes in
   the editor, and a weekly site-health digest (stale pages, empty live blocks,
-  broken external links).
+  broken external links). The importer, the live preview and the outbound
+  link check are currently **darkened** behind a platform switch; the block
+  builder and templates stay live.
 - **Media library**: `MediaService` is the single upload entry point; native-GD
   `ImageOptimizer` produces WebP/AVIF variants + EXIF strip, degrading to
   original-only on any gap. `<x-media-picture>` emits the source-set.
-  Config-gated AI alt-text and AI copy assistance are inert by default and
-  never overwrite human input.
+  Config-gated AI alt-text and AI copy assistance are inert by default, need
+  the AI add-on on the studio's plan, have a per-studio monthly token cap,
+  and never overwrite human input.
 - **Pageview analytics**: cookie-free beacon (`POST /studio/{tenant}/_pa/beacon`,
   DNT-honoring, daily-rotating visitor-hash salt so there is no cross-day
   tracking), raw events → nightly rollup (the only read path) → pruning per
-  retention setting; staff dashboard with CSV export.
+  retention setting; staff dashboard with CSV export. The whole stack is
+  darkened by default and, when relit, needs the analytics add-on.
 - **Lead capture** fires the tenant email engine (autoresponder + staff
   notification) inside `$tenant->run()`.
 
@@ -62,6 +66,27 @@ A token-driven theming layer over every tenant-facing surface.
   preview iframe tracks unsaved form state in isolation.
 - **Exclusions**: the platform operator console (not a studio surface) and the
   BCP offline PWA (self-contained by design) are outside theme scope.
+
+## The staff admin
+
+The Filament admin was redesigned to the "kiln ledger" prototype: a charcoal
+top bar with six folder tabs (Today, Programs, People, Finance, Funding,
+Settings), a terracotta sidebar and a cream paper surface, all bound to the
+same theme tokens so a theme swap retints it. The styling is additive (a
+render-hook stylesheet plus scoped per-screen classes), never a fork of
+Filament's compiled CSS, so a stale selector does nothing rather than
+breaking a screen.
+
+The six section panels it was first built on were later **consolidated into
+one panel**. The sidebar is scoped to the section you're in and stays
+collapsed unless something needs attention (a warning count on the section,
+or the group containing the current page). Filament remembers collapsed
+groups in the browser forever, so the server rewrites that stored list on
+every page load; `->collapsed()` alone would do nothing for anyone who had
+visited before. Old per-panel URLs 301 to their new home.
+
+Each section's resource list doubles as its permission area for staff roles,
+so the sidebar layout and who-can-edit-what can't drift apart.
 
 ## Website embeds (Squarespace et al.)
 
