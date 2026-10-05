@@ -12,7 +12,7 @@ The product covers, per studio:
   billable minutes, PIN/QR check-in, a front-desk POS with monitor shifts,
   card readers, a receipt printer and cash drawer.
 - **Firing** — kilns, kiln loads (a strict forward state machine), and an
-  immutable firing-credit ledger (consume on unload, peer transfers, packages).
+  immutable firing-credit ledger (charge at front-desk drop-off, peer transfers, packages).
 - **Memberships** — tiered benefits, Stripe Connect subscriptions, family
   members, applications, tier-gated catalog pricing.
 - **Classes** — templates → offerings → sessions, enrollment with waitlist

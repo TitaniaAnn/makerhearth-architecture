@@ -13,7 +13,7 @@ namespace MakerHearth\Architecture\Ledger;
 enum LedgerEntryType: string
 {
     case PURCHASE = 'purchase';         // firing-package activation credits cubic inches
-    case FIRING = 'firing';             // consume-on-unload debit
+    case FIRING = 'firing';             // charge-at-drop-off debit (one per drop-off record)
     case ADJUSTMENT = 'adjustment';     // staff correction (either sign) — appends, never edits
     case TRANSFER_OUT = 'transfer_out'; // peer transfer, debit half
     case TRANSFER_IN = 'transfer_in';   // peer transfer, credit half

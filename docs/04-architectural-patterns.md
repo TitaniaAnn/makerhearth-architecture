@@ -74,7 +74,7 @@ an add-on the studio holds. Add-ons can only widen access, never narrow it.
 Status enums are cast on models, and transitions go through named service
 methods that validate against a single transition map — illegal moves throw:
 
-- `KilnLoad` — strictly forward; `consumeFiring` fires **only** on unload.
+- `KilnLoad` — strictly forward; no transition charges (firing is paid at drop-off).
 - `TenantStatus` / `TenantPlanStatus` — access truth vs. billing truth, two
   separate state machines (see [07](07-platform-operations.md)).
 - `GrantStatus`, `SubstituteRequestStatus`, `PartyBooking` lifecycle,

@@ -135,7 +135,7 @@ erDiagram
     User ||--o{ Firing : owns
     User ||--o{ FiringLedgerEntry : "credits/debits"
     FiringPackagePurchase ||--o{ FiringLedgerEntry : "PURCHASE credit"
-    Firing ||--o{ FiringLedgerEntry : "CONSUME debit (on unload)"
+    Firing ||--o{ FiringLedgerEntry : "CONSUME debit (at drop-off)"
     FiringAdjustment ||--|| FiringLedgerEntry : correction
     FiringTransfer ||--o{ FiringLedgerEntry : "debit+credit pair"
 ```

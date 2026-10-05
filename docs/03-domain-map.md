@@ -32,11 +32,14 @@ the benefit resolver and the cart service), never model → model.
 - **Models:** `Kiln`, `KilnLoad`, `Firing`, `FiringLedgerEntry` (immutable),
   `FiringAdjustment`, `FiringTransfer`, `FiringPackageProduct`,
   `FiringPackagePurchase`, `VolunteerFiringGrant`
-- **Services:** `FiringService` (balance + consume-on-unload),
+- **Services:** `FiringService` (balance + charge at drop-off),
   `FiringAdjustmentService`, `FiringTransferService`, `KilnLoadService`
 - **Shape:** the flagship ledger domain. Balance is computed, never stored;
-  entries are immutable; `consumeFiring` runs on kiln-load **unload** (damaged/
-  aborted loads never bill); every balance mutation row-locks the user.
+  entries are immutable; `consumeFiring` runs at front-desk **drop-off** (one
+  record per firing; no kiln step charges, so a failed firing is refired free);
+  every balance mutation row-locks the user. Studios choose one payment for
+  bisque + glaze or one per firing, and standard (drop-off + pick-up) or
+  detailed (pieces in loads) tracking.
   `KilnLoad` is a strictly-forward state machine
   (LOADING → READY_TO_FIRE → FIRING → COOLING → READY_TO_UNLOAD → UNLOADED,
   ABORTED from any pre-terminal state).
@@ -295,7 +298,7 @@ flowchart LR
     ORDER -->|activateDownstream by product_type| ACT[Enrollment / Booking / Pass /<br/>Package / Membership / Ticket / Party /<br/>Rental / Gift card]
     ORDER --> GC[GiftCardService.redeemForOrder]
     CANCEL[cancelEnrollment / cancelBooking] -->|RefundDecision DTO| RS[RefundService]
-    UNLOAD[KilnLoadService.markUnloaded] --> FS[FiringService.consumeFiring]
+    DROPOFF[FiringService.dropOff<br/>POS 'Fire a piece'] --> FS[FiringService.consumeFiring]
     DOMAIN[any domain event] --> EAD[EmailAutomationDispatcher.fire]
     WRITE[watched model write] --> LIVE[LiveUpdates.emit<br/>after commit]
     PAID[paid orders + refunds] --> JB[JournalBuilder] --> ACC[AccountingSyncService]

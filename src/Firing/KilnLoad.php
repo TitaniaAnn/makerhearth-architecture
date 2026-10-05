@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace MakerHearth\Architecture\Firing;
 
 /**
- * A kiln load: a batch of members' pieces fired together. Status moves only
- * through KilnLoadLifecycle's named methods — this class deliberately has no
- * public status setter.
+ * A kiln load: one firing of one kiln. It always tracks kiln status; it holds
+ * pieces only in detailed tracking (standard tracking records drop-off and
+ * pick-up only). Status moves only through KilnLoadLifecycle's named methods —
+ * this class deliberately has no public status setter.
  */
 final class KilnLoad
 {
@@ -33,6 +34,19 @@ final class KilnLoad
     public function firings(): array
     {
         return $this->firings;
+    }
+
+    /**
+     * @internal the refire empties an aborted load into a new one
+     *
+     * @return list<Firing>
+     */
+    public function takeAllFirings(): array
+    {
+        $taken = $this->firings;
+        $this->firings = [];
+
+        return $taken;
     }
 
     /** @internal only KilnLoadLifecycle calls this, after consulting the map */
