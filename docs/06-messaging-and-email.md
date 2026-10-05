@@ -12,7 +12,7 @@ Mailable.
 EmailAutomationDispatcher::fire($trigger, $context, $recipient, $dedupKey);
 ```
 
-- **`EmailTrigger`** is a fixed enum catalog (~60+ cases). Each case declares
+- **`EmailTrigger`** is a fixed enum catalog (69 cases). Each case declares
   its surface (TENANT / PLATFORM / PUBLIC), opt-out category, whether it's a
   *system* trigger (editable copy, can't be disabled, bypasses opt-out — 
   enforced at the model layer by observers), and its context tokens.
@@ -26,15 +26,19 @@ EmailAutomationDispatcher::fire($trigger, $context, $recipient, $dedupKey);
 - **Drip steps**: `delay_minutes > 0` schedules the tenant-aware
   `SendAutomatedEmail` job; every fire writes an immutable
   `AutomatedEmailDelivery` row; the unique `dedup_key` makes fires idempotent.
-- Optional in-memory **attachments** (e.g. the tax-receipt PDF) ride the
-  immediate EMAIL path only.
+- Optional in-memory **attachments** (the tax-receipt PDF, the order-receipt
+  PDF when a studio turns it on) ride the immediate EMAIL path only.
+- **Secret tokens** carry values that must be emailed but never stored, such
+  as a gift-card code: the sent copy has the real value, the saved delivery
+  row keeps a masked copy (last four only), and a drip step sending later
+  from the row gets the masked value.
 
 ### Two engines, three surfaces
 
 | Surface | Engine | Tables | Notes |
 |---|---|---|---|
 | TENANT (member comms) | `EmailAutomationDispatcher` | tenant schema | opt-out aware, multi-channel, A/B |
-| PLATFORM (operator → tenant ops) | `PlatformEmailAutomationDispatcher` | central/public schema | email-only, raw-email recipients, no opt-out gate; managed at `/platform/emails` |
+| PLATFORM (operator → tenant ops) | `PlatformEmailAutomationDispatcher` | central/public schema | email-only, raw-email recipients, no opt-out gate; managed at `/platform/emails`; add-on changes, discount changes, member-cap notices, the weekly growth digest |
 | PUBLIC (marketing-site lead capture) | fires TENANT triggers inside `$tenant->run()` | tenant schema | autoresponder + staff notify |
 
 ## Multi-channel + A/B (tenant engine only)
@@ -46,18 +50,20 @@ routed through a `ChannelDriver` resolved by `ChannelManager`:
   `ChannelResult::skipped(reason)` (`sms_disabled`, `no_phone`,
   `push_unconfigured`, …). SMS (AWS SNS) and Web Push (VAPID,
   `PushSubscription` rows registered from the portal) transport only when
-  config **and** SDK are present, so CI runs the whole engine inert.
+  config **and** SDK are present, so CI runs the whole engine inert. SMS
+  also needs the studio's plan to include it (`sms_not_on_plan` otherwise).
 - **A/B variants are sticky and cross-channel**: one arm per recipient, picked
   by a weight-respecting hash of (recipient, step), stable across fires. An
-  email arm can be tested against an SMS arm; `VariantPerformance` reports
-  per-arm delivery outcomes.
+  email arm can be tested against an SMS arm; each delivery row records its
+  variant, so per-arm outcomes are a query over delivery rows.
 
 ## Bulk campaigns & deliverability
 
 - `BulkMessageCampaign` → `CampaignSender` (owns
   SCHEDULED→SENDING→SENT/PARTIAL/FAILED) → per-recipient
   `BulkMessageDelivery` rows with open/click tracking (`EmailOpen`,
-  `EmailClick`).
+  `EmailClick`). Suppressions and preferences are loaded for the whole list
+  up front, not per recipient.
 - **HMAC-signed central routes** for the open pixel, click redirect, and
   unsubscribe (`/m/o`, `/m/c`, `/m/u` via `URL::signedRoute`); the unsubscribe
   key is a per-`EmailPreference` random token, never a delivery id. RFC 8058
@@ -100,10 +106,23 @@ All evaluator-driven, cron-swept, idempotent, and opt-out aware:
   `MemberMilestoneAward` row. Seeded enabled.
 - **Fundraising sequences** — donation acknowledgment (transactional),
   stewardship 30/90/365-day touches, dedication notices, matching-gift nudges,
-  lapsed-donor recovery (re-armed on each new gift).
+  lapsed-donor recovery (re-armed on each new gift). The stewardship,
+  lapsed-recovery, behavioral, dormancy and anniversary sweeps are currently
+  **darkened**: built and tested, but unscheduled until relit (see
+  [09](09-scheduled-work.md)).
+- **Operational emails added since** — rental started / ending soon /
+  waitlist offer, gift card issued, procedure acknowledgment required and
+  review due, waiver signed.
 
 ## Theming
 
 `EmailThemeWrapper` optionally wraps rendered bodies in the tenant's theme
 (literal hex — mail clients don't resolve CSS vars); off by default, wired at
 every send site, stores the unwrapped body on delivery rows.
+
+## Deliverability metrics
+
+A pure read model (`DeliverabilityMetrics`) rolls the suppression feed and
+delivery logs into bounce and complaint rates against SES's reputation
+thresholds, shown on a staff dashboard with an 8-week trend. Per-tenant
+delivery logs are pruned on a configurable retention window (off by default).

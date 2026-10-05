@@ -35,6 +35,29 @@ final class MoneyMathTest extends TestCase
         self::assertSame(250, MoneyMath::percentOfCents(10000, 2.5));
     }
 
+    public function test_decimal_string_percent_stays_exact(): void
+    {
+        // Production sales-tax rates are decimal(7,4) columns that arrive as
+        // strings ("8.475"). 8.475% of 2000 = 169.5 → even neighbour 170;
+        // 8.475% of 6000 = 508.5 → even neighbour 508. No float on the way.
+        self::assertSame(170, MoneyMath::percentOfCents(2000, '8.475'));
+        self::assertSame(508, MoneyMath::percentOfCents(6000, '8.475'));
+    }
+
+    public function test_proportion_of_cents_splits_a_refund_half_even(): void
+    {
+        // The tax share of a partial refund: 1000 refunded on a 1085 order
+        // that carried 85 tax → 78.34 → 78.
+        self::assertSame(78, MoneyMath::proportionOfCents(1000, 85, 1085));
+
+        // Odd halves land on the even neighbour, same as percentOfCents.
+        self::assertSame(2, MoneyMath::proportionOfCents(5, 1, 2));
+        self::assertSame(4, MoneyMath::proportionOfCents(7, 1, 2));
+
+        // A zero denominator means "nothing to split", not a division error.
+        self::assertSame(0, MoneyMath::proportionOfCents(1000, 85, 0));
+    }
+
     public function test_apply_discount_is_complement_of_percent(): void
     {
         $cents = 4001;

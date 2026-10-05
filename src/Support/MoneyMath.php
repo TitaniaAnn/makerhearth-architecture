@@ -12,7 +12,8 @@ use Brick\Math\RoundingMode;
  * Shared integer-cent money math.
  *
  * Money is stored as integer cents in a single tenant currency. All
- * proportional cent math (discounts, revenue splits, proration) MUST route
+ * proportional cent math (discounts, revenue splits, proration, the tax share
+ * of a refund) MUST route
  * through here so rounding is consistent and customer-fair — never
  * `intdiv($cents * $percent, 100)`, which short-changes the customer on
  * every odd-half case.
@@ -21,7 +22,8 @@ use Brick\Math\RoundingMode;
  * space (no floats — brick/math deprecates float arguments) and rounds
  * exactly once.
  *
- * This is the production class verbatim (only the namespace differs).
+ * The class body is the production class verbatim; only the namespace and
+ * this docblock differ.
  *
  * @see ARCHITECTURE.md §2 — "Money is integer cents with banker's rounding"
  */
@@ -32,7 +34,7 @@ final class MoneyMath
      *
      * Example: 15% of 24000 = 3600; 50% of 4001 = 2000 (2000.5 → even).
      */
-    public static function percentOfCents(int $cents, float|int $percent): int
+    public static function percentOfCents(int $cents, float|int|string $percent): int
     {
         if ($cents === 0 || (float) $percent === 0.0) {
             return 0;
@@ -46,6 +48,23 @@ final class MoneyMath
     }
 
     /**
+     * `cents` × numerator / denominator, rounded HALF_EVEN — e.g. the share of
+     * a refund that was tax: proportionOfCents(refunded, tax, total).
+     */
+    public static function proportionOfCents(int $cents, int $numerator, int $denominator): int
+    {
+        if ($cents === 0 || $numerator === 0 || $denominator === 0) {
+            return 0;
+        }
+
+        return BigRational::of($cents)
+            ->multipliedBy($numerator)
+            ->dividedBy($denominator)
+            ->toScale(0, RoundingMode::HALF_EVEN)
+            ->toInt();
+    }
+
+    /**
      * The amount remaining after applying a percentage discount.
      */
     public static function applyDiscount(int $cents, float|int $discountPercent): int
@@ -54,9 +73,9 @@ final class MoneyMath
     }
 
     /**
-     * Pay for `hours` worked at `ratePerHourCents`, rounded HALF_EVEN to
-     * whole cents. Hours may carry fractional values (1.5, 1.75); kept in
-     * exact decimal space (no float) so payroll totals are reproducible.
+     * Pay for `hours` worked at `ratePerHourCents`, rounded HALF_EVEN to whole
+     * cents. Hours may carry fractional values (1.5, 1.75); kept in exact
+     * decimal space (no float) so payroll totals are reproducible.
      *
      * Example: 2.5h @ $20/hr (2000c) = 5000c.
      */
@@ -73,9 +92,29 @@ final class MoneyMath
     }
 
     /**
-     * `quantity × unitPriceCents` to whole cents, HALF_EVEN — for any line
-     * that carries a fractional quantity (studio-time hours, per-cubic-inch
-     * firing). Kept in exact decimal space so it agrees with the rest of the
+     * Display formatting for PHP-side strings — `$1,234.50` with thousands
+     * separators. For notifications, Filament states, and log/label strings;
+     * Blade templates keep using `<x-money>` per CLAUDE.md.
+     */
+    public static function format(int $cents): string
+    {
+        return '$'.number_format($cents / 100, 2);
+    }
+
+    /**
+     * ± cents formatted as a currency delta string — `+$12.00` for zero or
+     * positive, `$-1.50` for negative (the sign rides inside number_format's
+     * output). Matches the dashboards' historical delta rendering exactly.
+     */
+    public static function formatDelta(int $cents): string
+    {
+        return ($cents >= 0 ? '+' : '').'$'.number_format($cents / 100, 2);
+    }
+
+    /**
+     * `quantity × unitPriceCents` to whole cents, HALF_EVEN — for any line that
+     * carries a fractional quantity (studio-time hours, per-cubic-inch firing).
+     * Kept in exact decimal space (no float) so it agrees with the rest of the
      * system's banker's rounding instead of float round-half-away-from-zero.
      */
     public static function multiplyCents(int $unitPriceCents, float|int|string $quantity): int

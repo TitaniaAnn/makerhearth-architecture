@@ -34,7 +34,7 @@ are thin and deliberately give you no way to cheat: in this cut,
 (`private(set)`) so status is readable everywhere but writable only through
 [`KilnLoadLifecycle`](src/Firing/KilnLoadLifecycle.php) and
 [`OrderService`](src/Commerce/OrderService.php). The production platform has
-182 service classes across 31 domain namespaces following this rule; the
+270 service classes across 47 domain namespaces following this rule; the
 BCP offline-reconcile path replays queued device events through the *same*
 service entry points, which is the pattern's strongest payoff — an entire
 extra surface for free, with no new invariant code.
@@ -94,6 +94,15 @@ biased; "fair" beats "familiar" for money shared between a studio and its
 members.
 
 ### Where the seams are
+
+The class grows by addition, never by a second rounding rule. Since this cut
+was first extracted, production added sales tax and partial refunds of taxed
+orders, and both landed as new `MoneyMath` methods rather than local
+arithmetic: `percentOfCents()` now takes a decimal string (tax rates are
+`decimal(7,4)` columns, and 8.475% must not pass through a float), and
+`proportionOfCents()` computes the tax share of a partial refund. Both are
+tested here. `format()` / `formatDelta()` handle PHP-side display strings;
+Blade still goes through the money component.
 
 Single currency per tenant is assumed throughout. Multi-currency would
 change `MoneyMath`'s signature (amounts would need their currency) and
@@ -232,9 +241,16 @@ taken per-field across packages, booleans OR, no sources resolves to
 
 Production has a sibling resolver with the same shape:
 `TierGate`, the single authority for "may this member buy this catalog row,
-and at what tier price" — every catalog surface (passes, classes, events,
-products, firing packages) gates through it, with tier prices never
-stacking on percentage discounts.
+and at what tier price". Every catalog surface (passes, classes, events,
+products, firing packages, rentals) gates through it, and
+`TierGate::resolvePricing()` is the one rule for pricing: the member pays
+the lower of the tier override or the surface's discounted base, never
+both. That method exists because the rule was once copied into five
+surfaces and the copies disagreed. Classes compared the override against
+the *undiscounted* base, so a member whose percentage discount beat the
+override was overcharged. A code audit found it and folded every copy into
+the resolver. Promo codes follow the same max-not-sum rule per cart line:
+a line covered by two codes takes the single best discount.
 
 ### Why not the alternatives
 
@@ -269,12 +285,14 @@ re-implementing windows.
 Policies are pure: [`RefundPolicy`](src/Refunds/RefundPolicy.php) computes
 window math over hours-before-start and returns a
 [`RefundDecision`](src/Refunds/RefundDecision.php) — tier, amount, reason —
-included verbatim from production. Movement lives elsewhere
+whose class body is production verbatim. Movement lives elsewhere
 (`RefundService` in production) and consumes decisions; it never re-derives
-amounts. Every product kind (classes, lessons, events with separate
-admission/table windows, parties) has a policy this shape and **one**
+amounts. Class enrollments and party bookings feed decisions into **one**
 movement path with one set of guards (net-refundable, one-pending-per-order,
-order row-lock, POS monitor caps).
+order row-lock, POS monitor caps). The order's refunded total is derived
+from its live refund rows (`RefundService::rollUpOrder()`), and every
+settlement goes through one method that locks the order, then the refund,
+and refuses to settle past the order total.
 
 Verified by [`tests/RefundPolicyTest.php`](tests/RefundPolicyTest.php):
 window boundaries inclusive, partial amounts through banker's rounding,
@@ -290,9 +308,13 @@ settlement covers the human loop.
 
 ### Where the seams are
 
-Decisions carry a single amount; a future policy that splits a refund
-across tender types (part card, part store credit) would extend the DTO,
-not the call sites. The DTO is also where a "why" audit lives — the
+Decisions carry a single amount. When production added refunds to gift
+cards and store credit, the destination became a movement-side choice
+(staff pick "Refund to" when settling) and the DTO didn't change, which is
+the split working as designed: the policy decides *how much*, the movement
+decides *where it goes*. Production also deleted a fully built and tested
+refund-decision pipeline for events and lessons that no cancellation
+surface ever called; an unwired policy is dead code, however correct. The DTO is also where a "why" audit lives — the
 `reason` string is shown to members verbatim, which keeps policy authors
 honest.
 
@@ -323,6 +345,17 @@ return URL, and manual settlement all converge on it; it is idempotent
 by product type — strictly, so a vanished source row throws rather than
 silently minting a fresh one.
 
+Production has since added a second card processor (Square, beside
+Stripe), gift cards as a tender, sales tax and promo codes. None of them
+added a second "paid" path. Stripe's webhook still arrives through
+`markPaidFromIntent()`; Square's arrives through a processor-neutral
+`markPaidFromProcessorEvent()`; both end in the same `markPaid()`. A gift card pays
+part of an order without changing `total_cents` (the order records
+`gift_card_cents` beside it, so refund caps and revenue reads stay right).
+Tax is computed once, at the cart line, and included in that line's total,
+so checkout, card readers, refunds and store-credit caps carry it with no
+changes of their own.
+
 Verified by [`tests/OrderServiceTest.php`](tests/OrderServiceTest.php):
 the snapshot survives a catalog reprice, replayed `markPaid` activates
 exactly once, per-type dispatch skips past-consumption lines, and
@@ -343,7 +376,13 @@ The `sourceId` fan (production: a set of nullable `source_*_id` columns,
 deliberately FK-free on the cart to avoid circular references) trades
 referential integrity for decoupling — the join is by convention, guarded
 by the strictness rule. New product types plug in as a new enum case + one
-registered activation.
+registered activation; space rentals and gift cards were both added to
+production that way.
+
+The cost of "tax lives inside the line total" is that anything meaning
+*the price of the goods* (the gallery commission base, the tax-deductible
+part of a donation receipt, revenue on the P&L) has to read
+`total − tax`. Production names those sites; a new one has to remember.
 
 ---
 
@@ -376,7 +415,12 @@ settlement — §7's `settleOrder` — is a first-class path, and refunds wait
 as PENDING rows for out-of-band settlement); SMS/push channel drivers
 return typed skip results (`no_phone`, `sms_sdk_missing`) rather than
 throwing; calendar sync, AI assists, and image optimization degrade
-silently. The test suite exercises every integration's *disabled* path as
+silently. Later integrations follow the same rule: card processors sit
+behind a `CardProcessor` contract whose manager never throws (an
+unconfigured choice gets an "unavailable" processor), accounting sync to
+QuickBooks/Xero/Zoho has no Connect button until the platform app is
+configured, and live websocket updates fall back to polling when the
+socket server is off or down. The test suite exercises every integration's *disabled* path as
 a real code path — which is the only reason the contract stays true.
 
 The full treatment: [docs/05-payments-and-billing.md](docs/05-payments-and-billing.md)

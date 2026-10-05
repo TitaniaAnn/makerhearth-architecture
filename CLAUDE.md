@@ -27,7 +27,7 @@ Seven runnable decisions in [ARCHITECTURE.md](ARCHITECTURE.md) (§8–§9 descri
 - **The ledger has no update/delete path.** `FiringLedger` appends. A "fix" that edits or removes a row breaks the §3 contract and its tests; corrections are `ADJUSTMENT` rows.
 - **The transition map is the single source of truth.** `KilnLoadStatus::canTransitionTo()` — services consult it, nothing bypasses it. Billing hangs ONLY on the UNLOADED transition; don't move the consume call.
 - **All proportional money math goes through `MoneyMath`** (HALF_EVEN). Never `intdiv($cents * $percent, 100)`, never float intermediate values.
-- **Production-verbatim files.** `src/Support/MoneyMath.php` and `src/Refunds/RefundDecision.php` are the production classes with only the namespace changed. If you change them here, note that they've diverged from production (or change production too).
+- **Production-verbatim files.** `src/Support/MoneyMath.php` and `src/Refunds/RefundDecision.php` carry the production class bodies verbatim; only the namespace and the class docblock differ. If you change a body here, note that it has diverged from production (or change production too), and when production's body changes, re-copy it.
 - **SQLite stand-ins for Postgres idioms.** Production serializes ledger mutations with `DB::transaction` + `User::lockForUpdate()` (and PK-sorted two-user locking for transfers); this cut uses `BEGIN IMMEDIATE` because SQLite has no row locks. The comments in `FiringLedger` say so — keep that mapping accurate if you touch the transaction code.
 
 ## Conventions specific to this repo

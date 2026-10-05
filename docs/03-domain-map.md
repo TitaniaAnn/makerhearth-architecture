@@ -1,6 +1,6 @@
 # 3. Domain Map
 
-The 174 models and 182 services are organized into the domain namespaces below
+The 221 models and 270 service classes are organized into the domain namespaces below
 (`app/Services/<Domain>/`). Each domain exposes **service classes as its API**;
 models are thin. Cross-domain calls go service → service (e.g. enrollment calls
 the benefit resolver and the cart service), never model → model.
@@ -8,15 +8,25 @@ the benefit resolver and the cart service), never model → model.
 ## Core studio operations
 
 ### Operations (studio time, kiosk, POS)
-- **Models:** `StudioSession`, `Kiosk`, `POSTerminal`, `MonitorShift`, `BcpDevice`/`BcpEvent`
+- **Models:** `StudioSession`, `Kiosk`, `POSTerminal`, `MonitorShift`,
+  `PaymentTerminalReader`/`Location`, `ReceiptPrinter`, `PrintJob`,
+  `DrawerOpening` (immutable), `BcpDevice`/`BcpEvent`
 - **Services:** `Operations/StudioTimeService` (check-in/out; checkout bills
   billable minutes as a STUDIO_TIME cart line and records a `PassRedemption`
   when a pass covers the visit), `Pos/PosCheckoutService`, `Pos/PosSaleService`,
-  `Pos/PosRefundService`, `Pos/MonitorShiftService`, `Bcp/*` (offline reconcile)
+  `Pos/PosRefundService`, `Pos/PosCartService`, `Pos/MonitorShiftService`,
+  `Payments/TerminalService` + `TerminalReconcileService` (card readers,
+  offline store-and-forward), `Printing/ReceiptPrintService`, `Bcp/*`
+  (offline reconcile)
 - **Shape:** the kiosk is device-paired (hashed token, no user session); the POS
   adds monitor shifts — one open shift per (monitor, terminal) via a partial
   unique index; every checkout/sale/refund is shift-attributed; inactivity lock
-  + forgotten-shift auto-close. Members can also check in by PIN or QR.
+  + forgotten-shift auto-close. Members can also check in by PIN or QR. The
+  cart is per patron, not per terminal, so a charge carries the line ids the
+  screen showed and is refused if another terminal changed the cart. Card
+  readers are server-driven (Stripe or Square Terminal); the receipt printer
+  pulls jobs over Star CloudPRNT and kicks the cash drawer; with no printer
+  paired the whole path is inert.
 
 ### Firing
 - **Models:** `Kiln`, `KilnLoad`, `Firing`, `FiringLedgerEntry` (immutable),
@@ -43,15 +53,54 @@ the benefit resolver and the cart service), never model → model.
 ## Catalog & commerce
 
 ### Orders
-- **Models:** `Cart`, `CartLineItem`, `Order`, `OrderLineItem`, `OrderRefund`,
-  `OrderRefundLineItem`, `StoreCreditEntry` (immutable ledger)
+- **Models:** `Cart`, `CartLineItem`, `Order`, `OrderLineItem`, `OrderPayment`
+  (split-tender ledger), `OrderRefund`, `OrderRefundLineItem`,
+  `StoreCreditEntry` (immutable ledger), `GiftCard` +
+  `GiftCardLedgerEntry` (immutable), `CartGiftCard`, `PromoCode` +
+  `PromoCodeTarget` + `PromoRedemption` (immutable), `TaxRate`
 - **Services:** `Orders/CartService`, `Orders/OrderService`,
-  `Credits/StoreCreditService`, `Billing/RefundService`
+  `Credits/StoreCreditService`, `Billing/RefundService`,
+  `GiftCards/GiftCardService`, `Promotions/PromoCodeService`,
+  `Tax/SalesTax` (+ the pure `TaxCalculator`), `Orders/OrderReceiptPdf`
 - **Shape:** `OrderService::markPaid()` is the **single "order paid" contract**;
   Stripe reaches it via `markPaidFromIntent()`, manual settlement via
   `settleOrder()`. Downstream activations (enrollment, booking, pass, package,
-  membership, ticket, party) dispatch by `product_type` inside `markPaid`.
-  Line items snapshot price + terms at add-time.
+  membership, ticket, party, rental, gift card) dispatch by `product_type`
+  inside `markPaid`. Line items snapshot price + terms at add-time.
+- **Tax** is computed once, in the three line creators, and **included in
+  the line's `total_cents`** (`tax_cents` snapshotted beside it), so
+  checkout, readers, refunds and store-credit caps carry it unchanged.
+  Anything meaning "the price of the goods" reads `total − tax`.
+- **Gift cards are a tender, not a discount line**: `orders.total_cents`
+  stays the full price and `gift_card_cents` records the part gift cards
+  paid. Codes are never stored, only an HMAC plus the last four digits.
+- **Promo codes stack**, each covers only what's assigned to it, and a line
+  covered by two takes the single best discount, folded into the line's
+  `discount_cents` with tax recomputed at the line's frozen rate.
+
+### Card processors
+- **Contract:** `App\Contracts\Payments\CardProcessor` (hosted checkout,
+  reader payments, refunds, saved cards, `normalizeEvent()` →
+  `ProcessorEvent`), resolved per studio by `CardProcessorManager`, which
+  never throws (an unknown or unconfigured choice gets an "unavailable"
+  processor).
+- **Implementations:** `StripeCardProcessor` (the studio's Connect account)
+  and `SquareCardProcessor` (the studio's own Square account: payment links,
+  Square Terminal, cards on file). Orders record `payment_processor` +
+  `processor_payment_ref`; a void or refund uses the processor that took
+  the payment, not today's setting.
+
+### Space rentals
+- **Models:** `RentalSpaceType` → `RentalUnit` → `RentalAssignment`
+  (PENDING / ACTIVE / ENDING / ENDED, price snapshotted), `RentalWaitlistEntry`
+- **Services:** `Rentals/RentalService` (the only write path),
+  `RentalBilling` (Stripe subscription on the studio's account),
+  `RentalWaitlistService`
+- **Shape:** capacity is derived from active units, never stored. One live
+  renter per unit is enforced twice: a row lock on the unit and a partial
+  unique index. A rental type can require its own signed agreement (an
+  inactive waiver document signed on its own). A freed unit is offered to
+  the next person waiting for 48 hours and counts as taken meanwhile.
 
 ### Memberships & benefits
 - **Models:** `Membership`, `MembershipTier` (with `tier_level`),
@@ -64,8 +113,9 @@ the benefit resolver and the cart service), never model → model.
   active Membership + PassPurchase + VolunteerAssignment + BoardTerm
   (max-for-discounts, OR-for-booleans, sum-for-allowances). `TierGate` is the
   single tier-gating/pricing contract — every catalog surface (passes, classes,
-  events, products, firing packages) gates and tier-prices through it, with
-  no discount stacking.
+  events, products, firing packages) gates and tier-prices through it, and
+  `TierGate::resolvePricing()` is the one override-vs-discount rule (the
+  member pays the lower, never both).
 
 ### Passes
 - **Models:** `PassType` (with `PassCreditType` + `credit_count`),
@@ -145,9 +195,14 @@ the benefit resolver and the cart service), never model → model.
 
 ### Gallery
 - **Models:** `GalleryItem`, `GallerySale` (immutable, unique per item),
-  `ArtistProfile`, `ArtistPayout*`
+  `ArtistProfile` (guest artists have no user account), `ArtistPayout*`,
+  `GalleryShow`, `GalleryPlacement`, `GallerySubmission`
 - **Services:** `Gallery/GalleryConsignmentService` (idempotent `markSold`),
-  payout pipeline
+  `GallerySaleService` (row-locked; a duplicate delivery returns the
+  existing sale), `GallerySubmissionService` (public call for entry with
+  per-artist caps and entry fees), `Square/*` (register sync over a
+  HMAC-verified webhook + a reconcile cron), payout pipeline paying from the
+  sale-time commission snapshot
 
 ## People & governance
 
@@ -156,6 +211,57 @@ the benefit resolver and the cart service), never model → model.
   `VolunteerAssignment`, `VolunteerProfile`, `BoardPosition`, `BoardTerm`
   (shelf choice; issues FREE_CLASS credits per term via observer)
 - Feed into `BenefitResolver` as benefit sources.
+
+### Procedures
+- **Models:** `Procedure` (draft body, audience, required flag, review
+  date), `ProcedureVersion` and `ProcedureAcknowledgment` (both immutable,
+  refusing update/delete at the model like `WaiverSignature`)
+- **Services:** `Procedures/ProcedureService` (publish, acknowledge,
+  audience rules, outstanding lists)
+- **Shape:** the studio's own written practices, never help docs for the
+  software. A publish can require everyone to re-read it or not (a typo fix
+  doesn't reset anyone). Two opt-in gates use it: a volunteer role can
+  require its procedures before assignment, and a studio can refuse to
+  open a POS shift until the monitor has read theirs.
+
+### Staff roles
+- **Models:** `StaffRole` (one undeletable default role) + `staff_role_user`
+- **Shape:** `App\Policies\StudioPolicy` is every model's policy. The
+  permission areas are derived from the admin sidebar sections, so moving a
+  resource in the sidebar moves its permission with it. Edit and delete are
+  separate permissions per area; extra powers (comps, POS PINs, devices,
+  payroll, donor data) sit outside the areas. The owner has everything.
+
+## Studio analytics & back office
+
+### Growth metrics
+- **Models:** `MembershipLifecycleEvent` (append-only, written only by
+  `MembershipService`), `GrowthMetricDaily` (nightly snapshot)
+- **Services:** `Metrics/GrowthMetricsService` (pure read layer)
+- **Shape:** event spine → pure metrics → nightly snapshot → reports,
+  dashboard and at-risk lists. The definitions are pinned: churn is dated
+  when benefits end, not when a cancel is requested; a cancel then
+  activate within 7 days onto another tier is a tier switch, not churn; a
+  churn rate over an empty base is null, never a fake 0%.
+
+### Accounting sync
+- **Models:** `AccountingConnection` (encrypted tokens), `AccountingSyncRecord`,
+  `AccountingAccountMapping`, `AccountingCustomerLink`
+- **Services:** `Accounting/JournalBuilder` (pure: orders and refunds →
+  balanced journal entries), `AccountingSyncService`, one provider per
+  system behind an `AccountingProvider` contract (QuickBooks Online, Xero,
+  Zoho Books), `JournalExport` (CSV / QuickBooks Desktop IIF, free)
+- **Shape:** a studio picks a daily summary or one entry per sale and can
+  switch at any time; nothing is ever counted twice across a switch. OAuth
+  callbacks land on one central route with an encrypted, single-use state.
+
+### Data import
+- **Services:** `Import/StudioImporter` + one importer per CSV template
+- **Shape:** loads a studio's records from another system. Every row is its
+  own savepoint (one bad row is reported, the rest load); a dry run is the
+  whole run inside a rolled-back transaction, so its report is exact; an
+  `import_records` map from source id to model makes re-runs update rather
+  than duplicate.
 
 ## Communications & web
 
@@ -168,7 +274,8 @@ The public-site block builder, media library, theme catalog, and config-gated
 AI assists: [08-public-site-and-theming.md](08-public-site-and-theming.md).
 
 ### Platform
-The operator console (lifecycle, errors, billing, signup, tickets):
+The operator console (lifecycle, errors, billing, add-ons, discounts,
+signup, tickets, growth):
 [07-platform-operations.md](07-platform-operations.md).
 
 ## Cross-domain seams (the calls that matter)
@@ -182,14 +289,21 @@ flowchart LR
     BOOK[PrivateLessonBookingService] --> BR
     POSS[PosSaleService] --> TG
     CHECKOUT[StudioTimeService] --> BR
-    CART --> ORDER[OrderService.markPaid]
-    ORDER -->|activateDownstream by product_type| ACT[Enrollment / Booking / Pass /<br/>Package / Membership / Ticket / Party]
+    CART --> PROMO[PromoCodeService.prepareForCheckout]
+    PROMO --> ORDER[OrderService.markPaid]
+    PROC[CardProcessor webhook<br/>Stripe / Square] --> ORDER
+    ORDER -->|activateDownstream by product_type| ACT[Enrollment / Booking / Pass /<br/>Package / Membership / Ticket / Party /<br/>Rental / Gift card]
+    ORDER --> GC[GiftCardService.redeemForOrder]
     CANCEL[cancelEnrollment / cancelBooking] -->|RefundDecision DTO| RS[RefundService]
     UNLOAD[KilnLoadService.markUnloaded] --> FS[FiringService.consumeFiring]
     DOMAIN[any domain event] --> EAD[EmailAutomationDispatcher.fire]
+    WRITE[watched model write] --> LIVE[LiveUpdates.emit<br/>after commit]
+    PAID[paid orders + refunds] --> JB[JournalBuilder] --> ACC[AccountingSyncService]
 ```
 
-Three resolvers are **single contracts** — new sources/surfaces plug into them,
-never into call sites: `BenefitResolver` (what a user gets),
+Five resolvers are **single contracts**; new sources and surfaces plug into
+them, never into call sites: `BenefitResolver` (what a user gets),
 `TierGate` (what a user may buy and at what price),
-`EmailAutomationDispatcher` (every transactional communication).
+`EmailAutomationDispatcher` (every transactional communication),
+`PlanGate` / `Features::enabledFor()` (what a studio's plan and add-ons
+allow), and `CardProcessorManager` (which processor moves the money).

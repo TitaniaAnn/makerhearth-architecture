@@ -23,7 +23,10 @@ computed, never stored**:
 - `StoreCreditEntry` (store credit)
 - `PassRedemption` (pass credits — remaining = purchased − redemption rows)
 - `FreeClassLedgerEntry` (board free-class credits)
+- `GiftCardLedgerEntry` (gift-card balances: issue / redeem / refund / adjust)
 - `GallerySale` (sales ledger)
+- `PromoRedemption`, `DrawerOpening`, `ProcedureAcknowledgment`,
+  `MembershipLifecycleEvent` (append-only records that counts are read from)
 - Campaign/pledge/peer-fundraiser totals (`raisedCents()` etc. are queries)
 
 Corrections and refunds append new entries; nothing is edited. Filament
@@ -31,7 +34,9 @@ resources for ledger tables deny create/update/delete.
 
 ## Snapshot-on-purchase
 
-`CartLineItem`, `OrderLineItem`, `PassPurchase`, `FiringPackagePurchase` freeze
+`CartLineItem`, `OrderLineItem`, `PassPurchase`, `FiringPackagePurchase`,
+`RentalAssignment`, and the platform's `TenantPlan` (a studio's price is locked
+when it joins a tier; repricing the tier never moves an existing studio) freeze
 price and terms at purchase time — no FK dereference to the live catalog row
 for pricing. Re-pricing paths (e.g. quantity-merge re-adds) read the **frozen**
 snapshot unit, so a later catalog change never silently reprices a cart.
@@ -60,7 +65,9 @@ sale), in order:
 
 Tier gating (`TierGate`) and plan gating (`PlanGate`, platform side) follow the
 same "single resolver, many call sites" shape — and both fail closed for gated
-features.
+features. `Features::enabledFor($flag)` is the one check for a plan feature:
+the platform-level dark switch (if the feature has one) AND the plan tier or
+an add-on the studio holds. Add-ons can only widen access, never narrow it.
 
 ## State machines with named transitions
 
@@ -76,8 +83,8 @@ methods that validate against a single transition map — illegal moves throw:
 
 ## Refund decisions are values, not actions
 
-`cancelEnrollment` / `cancelBooking` return a `RefundDecision` DTO (tier,
-amount, reasoning). Money movement happens separately in
+Class and party cancellations compute a `RefundDecision` DTO (tier, amount,
+reasoning) from a pure policy (`ClassRefundPolicy`, `PartyRefundPolicy`). Money movement happens separately in
 `RefundService::applyDecisionTo…()`, producing `OrderRefund` rows. This split
 keeps refund *policy* pure and testable and money *movement* auditable — and
 lets Stripe-less studios settle refunds out-of-band while rows sit PENDING.
@@ -85,9 +92,11 @@ lets Stripe-less studios settle refunds out-of-band while rows sit PENDING.
 ## Money
 
 Integer cents everywhere via brick/money; single currency per tenant.
-Proportional math goes through `MoneyMath::percentOfCents()` (banker's
-rounding — `HALF_EVEN`), never `intdiv`. Views render money through the
-`<x-money :cents>` Blade component only.
+Proportional math goes through `MoneyMath` (`percentOfCents()`,
+`proportionOfCents()`; banker's rounding, `HALF_EVEN`), never `intdiv` and
+never a float `round()`. Views render money through the `<x-money :cents>`
+Blade component; PHP-side strings use `MoneyMath::format()`. Admin money
+inputs are typed in dollars and converted with exact decimal math.
 
 ## Soft delete via `is_active`
 
@@ -129,11 +138,43 @@ and CI run every code path with nothing configured:
 - Google Calendar sync, AI copy/alt-text (Anthropic), GeoIP: config-gated,
   degrade silently, never overwrite human input, errors return null.
 - Image optimization: no GD → original-only variants, never throws.
+- Card processors: `CardProcessorManager` hands back an "unavailable"
+  processor for an unknown or unconfigured choice rather than throwing.
+- Accounting sync: a provider with no platform app credentials has no
+  Connect button; a refused token refresh marks the connection "needs
+  reconnect" and stops, it doesn't throw.
+- Live updates (Reverb): off or down means polling, which every live screen
+  keeps running as the safety net.
+
+## Darkened features
+
+Some built features are switched off platform-wide in `config/features.php`
+(advanced fundraising, pageview analytics, site-authoring extras, SLO
+monitoring, lifecycle engagement). Their models, services and migrations stay;
+their screens deny access and their crons are left unscheduled with a comment
+saying how to relight them. A guard test pins the default-off contract, so
+"fixing" one back on has to be deliberate.
+
+## Shared contracts from the code audit
+
+A four-agent code audit consolidated duplicated logic into named contracts.
+New code routes through them instead of re-inlining:
+
+- `TierGate::resolvePricing()`: the override-vs-discount rule (five copies
+  used to disagree).
+- `PassPurchasePolicy`: the pass-sale guard ladder and its staff/member
+  wording.
+- `BaseExpiryReminderCommand`: every "X expiring soon" email, with the
+  date-vs-timestamp boundary as an explicit hook.
+- `IteratesTenants`: central commands that sweep tenants themselves.
+- `ResolvesSafeUrls`: dashboard links that resolve only if the viewer can
+  open the target, and degrade to plain text otherwise.
 
 ## Configuration & code hygiene
 
 - `config()` over `env()` outside `config/*.php` (config caching breaks `env()`).
-- `declare(strict_types=1);` in every file (Pint-enforced).
+- `declare(strict_types=1);` in every file (enforced by Pint's
+  `declare_strict_types` rule, so CI rejects a missing declare).
 - Enums cast on models; no raw status strings.
 - Constructor injection for domain services; facades only for framework
   concerns.
